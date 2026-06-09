@@ -1,20 +1,20 @@
-# Interval-Aware Mixture of Experts (IAMoE)
+# Interval-Aware Mixture of Experts (IA-MoE)
 
-A PyTorch implementation of an **Interval-Aware Mixture of Experts (MoE)** architecture inspired by DeepSeek-MoE, featuring dynamic/static ordered centroids for structured expert routing and label-interval-based gating supervision.
+A PyTorch implementation of an **Interval-Aware Mixture of Experts (IA-MoE)** framework for regression tasks. IA-MoE introduces interval-aware routing supervision to encourage expert specialization across different regions of the target distribution, improving performance on imbalanced regression problems.
 
 ## Overview
 
-This project implements a MoE module where expert routing is guided by **ordered centroids** in the embedding space, aligned with target value intervals. The key idea is to encourage each routed expert to specialize on a specific range of the target distribution, improving both interpretability and load balance.
+IA-MoE extends conventional Mixture of Experts architectures by incorporating interval-based target decomposition and routing supervision. Target values are partitioned into ordered intervals, and experts are encouraged to specialize in specific regions of the target space through soft interval-aware gating targets.
 
-### Key Components
+## Project Structure
 
 | Module | Description |
-|---|---|
-| `models/centroids.py` | Static and dynamic ordered centroid providers for routing |
-| `models/deepseek_moe.py` | Core MoE layer |
-| `models/gating_loss.py` | Soft interval-based gating supervision loss (KL divergence) |
+|----------|-------------|
+| `models/centroids.py` | Static and dynamic ordered centroid construction for expert routing |
+| `models/deepseek_moe.py` | Core MoE layer with Top-K expert routing |
+| `models/gating_loss.py` | Interval-aware routing supervision loss |
 | `models/module.py` | High-level `IAMoE` wrapper module |
-| `utils/util.py` | Dataset utilities: label normalization and quantile-based interval construction |
+| `utils/util.py` | Dataset preprocessing, label normalization, and interval construction |
 
 ## Installation
 
@@ -27,21 +27,46 @@ pip install -r requirements.txt
 ```python
 from utils.util import calmean
 from models.module import IAMoE
+from models.gating_loss import CustomExpertMSELoss
 
-# 1. Compute label statistics and quantile intervals from your dataset
+import torch
+import torch.nn.functional as F
+
+# Compute label statistics and interval assignments
 mean, std, intervals, group_nums, group_labels, num_experts = calmean(dataset)
 
-# 2. Build the model
+# Build IA-MoE
 model = IAMoE(
-    input_feat=256,       # Input feature dimension
-    dim_feat=128,         # Expert hidden dimension
-    num_tasks=1,
-    num_experts=4,        # Number of routed experts
-    num_heads=1,
-    output_feat=128,
-    intervals=intervals,
+    input_feat=256,
+    dim_feat=128,
+    num_experts=num_experts,
 )
 
-# 3. Forward pass
-gate, output = model(x, epoch=epoch)
+# Interval-aware routing supervision loss
+criterion = CustomExpertMSELoss(intervals=intervals)
+
+optimizer = torch.optim.Adam(model.parameters(), lr=1e-3)
+
+for epoch in range(num_epochs):
+
+    # Forward pass
+    gate, output = model(x, epoch=epoch)
+
+    # Task-specific prediction head
+    predictions = predictor(output)
+
+    # Regression loss
+    loss_task = F.mse_loss(predictions, targets)
+
+    # Interval-aware routing supervision
+    # targets_denorm: denormalized regression labels
+    loss_gate = criterion(targets_denorm, gate)
+
+    # Joint optimization
+    loss = loss_task + loss_gate
+
+    optimizer.zero_grad()
+    loss.backward()
+    optimizer.step()
 ```
+
