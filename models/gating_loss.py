@@ -1,4 +1,5 @@
 import torch
+import torch.nn.functional as F
 
 def build_soft_target_distribution_gating(y, intervals, sigma=0.2):
     """
@@ -22,6 +23,28 @@ def build_soft_target_distribution_gating(y, intervals, sigma=0.2):
 
     return soft
 
+def gating_supervision_loss(gating_probs, targets_denorm, intervals, loss_type="kl", sigma=0.2):
+    """
+    gating_probs: [B, E] from softmax gating
+    targets_denorm: [B] (denormalized y)
+    intervals: list of (lower, upper)
+    loss_type: "kl" or "mse"
+    """
+    soft_targets = build_soft_target_distribution_gating(targets_denorm, intervals, sigma=sigma)  # [B, E]
+    if loss_type == "kl":
+        loss = F.kl_div(torch.log(gating_probs + 1e-8), soft_targets, reduction='batchmean')
+
+        cdf_p = soft_targets.cumsum(dim=1)
+        cdf_q = gating_probs.cumsum(dim=1)
+        w1 = (cdf_p - cdf_q).abs().sum(dim=1).mean()
+    elif loss_type == "mse":
+        loss = F.mse_loss(gating_probs, soft_targets)
+        w1 = torch.tensor(0.0, device=gating_probs.device)
+    else:
+        raise ValueError("Unsupported loss_type: choose 'kl' or 'mse'")
+
+    return loss, w1
+    
 class CustomExpertMSELoss(torch.nn.Module):
     def __init__(self, intervals=None):
         super().__init__()
