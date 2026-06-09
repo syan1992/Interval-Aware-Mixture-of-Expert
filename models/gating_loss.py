@@ -43,7 +43,7 @@ def gating_supervision_loss(gating_probs, targets_denorm, intervals, loss_type="
     else:
         raise ValueError("Unsupported loss_type: choose 'kl' or 'mse'")
 
-    return loss, w1
+    return loss
     
 class CustomExpertMSELoss(torch.nn.Module):
     def __init__(self, intervals=None):
